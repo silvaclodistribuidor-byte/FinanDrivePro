@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>FinanDrive — Assistente do Motorista</title>
+  <meta name="theme-color" content="#0b1220" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyAAVAJlB7t9PYKTQ0DLt5t6gU1h0g9jY",
+      authDomain: "finandrive-de2f1.firebaseapp.com",
+      projectId: "finandrive-de2f1",
+      storageBucket: "finandrive-de2f1.appspot.com",
+      messagingSenderId: "986988158784",
+      appId: "1:986988158784:web:f3bf7eb2453f2f375b149"
+    };
+    let db = null;
+    try {
+      const app = firebase.initializeApp(firebaseConfig);
+      db = firebase.firestore();
+    } catch (e) {
+      console.warn('Firebase init failed', e);
+    }
+  </script>
+
+  <style>
+    :root{ --bg:#0b1220; --panel:#0f172a; --glass:rgba(255,255,255,0.06); --bd:#1f2937; --txt:#e5e7eb; --muted:#94a3b8; --accent:#3b82f6; --ok:#22c55e; --danger:#ef4444; --warning:#f59e0b; }
+    *{box-sizing:border-box} html,body{height:100%;overflow:hidden} body{margin:0;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial}
+    .container{max-width:920px;height:100%;margin:0 auto;padding:12px}
+    .app{height:calc(100% - 24px);background:var(--panel);border:1px solid var(--bd);border-radius:18px;box-shadow:0 12px 30px rgba(0,0,0,.35);overflow:hidden;display:flex;flex-direction:column}
+    .topbar{position:sticky;top:0;z-index:10;background:var(--panel);border-bottom:1px solid var(--bd)}
+    .header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px}
+    .title{font-weight:800;font-size:20px}
+    .pill{font-size:12px;padding:6px 10px;border-radius:999px;border:1px solid var(--bd);background:var(--glass);display:flex;gap:8px;align-items:center}
+    .pill .dot{width:8px;height:8px;border-radius:50%}.pill .dot.go{background:var(--ok)}.pill .dot.stop{background:var(--danger)}.pill .dot.pause{background:var(--warning)}
+    .kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:8px 12px 10px}
+    @media (min-width:480px){.kpis{grid-template-columns:repeat(6,minmax(0,1fr))}}
+    .kpi{background:var(--glass);border:1px solid var(--bd);border-radius:12px;padding:8px 10px;backdrop-filter:blur(6px);min-height:56px}
+    .kpi .label{font-size:11px;color:var(--muted);margin-bottom:2px;display:flex;align-items:center;gap:6px}
+    .kpi .value{font-weight:800;font-size:17px;line-height:20px}
+    #cardUber{background:#000;border-color:#0a0a0a} #cardUber .label{color:#9ca3af} #cardUber .value{color:#f9fafb}
+    #cardPop{background:#fff7c2;border-color:#f2d24b;color:#0b1220} #cardPop .label{color:#4b5563} #cardPop .value{color:#0b1220}
+    #cardNet{background:#065f46;border-color:#047857} #cardNet .label{color:#a7f3d0} #cardNet .value{color:#ecfdf5}
+    .actions{display:flex;gap:8px;padding:8px 12px 10px;flex-wrap:wrap}
+    .btnAction{flex:1 1 48%;display:flex;align-items:center;justify-content:center;gap:8px;border-radius:12px;padding:14px 12px;font-weight:700;border:1px solid var(--bd);background:#0b1220;cursor:pointer;min-height:50px}
+    .btnAction.primary{background:var(--accent);border:none;color:#fff} #breakBtn.btnAction{background:var(--warning);border:none;color:#0b1220}
+    .chat{flex:1;overflow:auto;padding:12px;min-height:120px}
+    .bubbles{display:flex;gap:8px;margin:8px 0}.bubble{max-width:85%;padding:10px 12px;border-radius:14px;border:1px solid var(--bd);background:#0b1220}.user .bubble{margin-left:auto;background:var(--accent);border:none;color:#fff}
+    .controls{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--bd);background:rgba(0,0,0,.15);backdrop-filter:blur(6px);position:sticky;bottom:0;padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+    .input{flex:1;border:1px solid var(--bd);border-radius:12px;padding:12px;background:#0b1220;color:#fff;min-height:48px}
+    .btn{border:1px solid var(--bd);border-radius:12px;padding:12px 14px;background:#0b1220;color:#fff;cursor:pointer;min-width:48px;min-height:48px}.btn.primary{background:var(--accent);border:none;font-weight:800}.btn.voice{background:var(--ok);border:none;color:#00150a;font-weight:800}
+    .footer{font-size:12px;color:var(--muted);padding:8px 16px 16px}
+  </style>
+</head>
+<body>
+  <div class="container"><div class="app">
+    <div class="topbar">
+      <div class="header">
+        <div class="title">FinanDrive</div>
+        <div id="pill" class="pill"><span class="dot stop"></span><span id="pillText">Sem turno</span></div>
+      </div>
+      <div class="kpis" id="kpis">
+        <div class="kpi"><div class="label">🕓 Horas (líq.)</div><div id="kpiHours" class="value">0h00</div></div>
+        <div class="kpi"><div class="label">💸 R$/h</div><div id="kpiRph" class="value">—</div></div>
+        <div class="kpi"><div class="label">🧮 R$/km</div><div id="kpiRpkm" class="value">—</div></div>
+        <div id="cardNet" class="kpi"><div class="label">💰 Líquido</div><div id="kpiNet" class="value">—</div></div>
+        <div id="cardUber" class="kpi"><div class="label">🚕 Uber</div><div id="kpiUber" class="value">—</div></div>
+        <div id="cardPop" class="kpi"><div class="label">🚗 Pop</div><div id="kpiPop" class="value">—</div></div>
+        <div class="kpi"><div class="label">📏 KM</div><div id="kpiKm" class="value">—</div></div>
+      </div>
+      <div class="actions">
+        <button id="shiftBtn" class="btnAction primary">⏺️ Iniciar</button>
+        <button id="breakBtn" class="btnAction">⏸️ Pausa</button>
+      </div>
+    </div>
+
+    <section id="chat" class="chat"></section>
+
+    <form id="form" class="controls">
+      <button id="micBtn" type="button" class="btn voice">🎙️ Voz</button>
+      <input id="input" autocomplete="off" placeholder="" class="input" />
+      <button class="btn primary">Enviar</button>
+    </form>
+
+    <div class="footer">Tudo é salvo apenas no seu aparelho.</div>
+  </div></div>
+
+<script>
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js'); }
+const STORAGE_KEY='finandrive_state_v12_3';
+const SYNC_ENABLED = !!(window.firebase && db);
+
+async function syncShiftToCloud(shift, options={}){
+  if (!SYNC_ENABLED || !shift) return;
+  const nowISO = new Date().toISOString();
+  if (!shift.idLocal) {
+    try {
+      shift.idLocal = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('local_' + Date.now());
+    } catch {
+      shift.idLocal = 'local_' + Date.now();
+    }
+  }
+  const payload = Object.assign({}, shift, {
+    status: shift.endISO ? 'fechado' : 'aberto',
+    updatedAt: nowISO
+  });
+  try {
+    if (shift.idRemoto) {
+      await db.collection('turnos').doc(shift.idRemoto).set(payload, { merge: true });
+    } else {
+      const ref = await db.collection('turnos').add(
+        Object.assign(
+          { createdAt: shift.createdAt || nowISO },
+          payload
+        )
+      );
+      shift.idRemoto = ref.id;
+    }
+    shift.sincronizado = true;
+    save();
+  } catch (e) {
+    console.warn('Erro ao sincronizar turno na nuvem', e);
+    shift.sincronizado = false;
+    save();
+  }
+}
+
+async function syncPendingShifts(){
+  if (!SYNC_ENABLED || !state) return;
+  const list = [];
+  if (Array.isArray(state.history)) list.push.apply(list, state.history);
+  if (state.currentShift) list.push(state.currentShift);
+  for (const s of list) {
+    if (!s) continue;
+    if (s.sincronizado) continue;
+    try {
+      await syncShiftToCloud(s);
+    } catch (e) {
+      console.warn('Erro ao sincronizar pendente', e);
+    }
+  }
+}
+
+let state=load()||{ currentShift:null, history:[] };
+function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+function load(){ try{ return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { return null; } }
+const toMoney=v=> (v===null||isNaN(v))?'—':Number(v).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const minutesBetween=(a,b)=>Math.max(0,Math.round((b-a)/60000));
+const parseNumberBR=(txt)=>{ const m=(String(txt)||'').replace(/\s/g,'').match(/-?\d{1,3}(?:\.\d{3})*(?:,\d+)?|-?\d+(?:\.\d+)?/); if(!m) return null; const raw=m[0]; const norm=raw.includes(',')?raw.replace(/\./g,'').replace(',', '.'):raw; return parseFloat(norm); };
+const parseTime=(txt)=>{ const m=(txt||'').match(/(\d{1,2})[:h]?(\d{2})/i); if(!m) return null; const hh=+m[1], mm=+m[2]; if(hh>23||mm>59) return null; const d=new Date(); d.setHours(hh,mm,0,0); return d; };
+const fmtHHMM=(h)=>{ if(!isFinite(h)||h<=0) return '0h00'; const m=Math.round(h*60); return Math.floor(m/60)+'h'+String(m%60).padStart(2,'0'); };
+const chatEl=document.getElementById('chat');
+function addMsg(text, who='bot'){ const wrap=document.createElement('div'); wrap.className='bubbles '+(who==='user'?'user':''); const b=document.createElement('div'); b.className='bubble'; b.innerHTML=text; wrap.appendChild(b); if(who==='user') wrap.classList.add('user'); chatEl.appendChild(wrap); chatEl.scrollTop=chatEl.scrollHeight; }
+const kpiHours=document.getElementById('kpiHours');
+const kpiRph=document.getElementById('kpiRph');
+const kpiRpkm=document.getElementById('kpiRpkm');
+const kpiNet=document.getElementById('kpiNet');
+const kpiUber=document.getElementById('kpiUber');
+const kpiPop=document.getElementById('kpiPop');
+const kpiKm=document.getElementById('kpiKm');
+function computeMetrics(s){
+  if(!s) return {hours:0,km:0,gross:0,cost:0,net:0,rph:null,rpkm:null};
+  const start=new Date(s.startISO); let end;
+  if(s.endISO) end=new Date(s.endISO);
+  else { const open=(s.breaks||[]).find(b=>!b.endISO); end=(s.paused&&open)? new Date(open.startISO): new Date(); }
+  let minutes=minutesBetween(start,end);
+  (s.breaks||[]).forEach(b=>{ if(!b.endISO) return; const bs=new Date(b.startISO), be=new Date(b.endISO); const cs=bs<start?start:bs; const ce=be>end?end:be; if(ce>cs) minutes-=minutesBetween(cs,ce); });
+  if(minutes<0) minutes=0; const hours=Math.max(0,minutes/60);
+  let km=0; const hasOdo=(typeof s.odoStart==='number')&&(typeof s.odoEnd==='number')&&isFinite(s.odoStart)&&isFinite(s.odoEnd);
+  if(hasOdo) km=Math.max(0,s.odoEnd-s.odoStart); else if(typeof s.kmSet==='number'&&s.kmSet>0) km=s.kmSet; else km=s.kmManual||0;
+  const gross=(typeof s.gross==='number'?s.gross:0);
+  const cost=(s.costs||[]).reduce((x,c)=>x+c.value,0);
+  const net=gross-cost;
+  return {hours,km,gross,cost,net,rph:hours>0?net/hours:null,rpkm:km>0?net/km:null};
+}
+function updateStatus(){
+  const pill=document.getElementById('pill'); const pillText=document.getElementById('pillText');
+  const hasShift=!!state.currentShift; const ended=hasShift&&!!state.currentShift.endISO; const breakOpen=hasShift&&(state.currentShift.breaks||[]).some(b=>!b.endISO); const paused=hasShift&&!ended&&(state.currentShift.paused===true||breakOpen);
+  const m=computeMetrics(state.currentShift);
+  if(!hasShift){ pillText.textContent='Sem turno'; pill.querySelector('.dot').className='dot stop'; }
+  else if(ended){ pillText.textContent='Encerrado'; pill.querySelector('.dot').className='dot stop'; }
+  else if(paused){ pillText.textContent='Pausado'; pill.querySelector('.dot').className='dot pause'; }
+  else { pillText.textContent='Em andamento'; pill.querySelector('.dot').className='dot go'; }
+  kpiHours.textContent=fmtHHMM(m.hours); kpiRph.textContent=m.rph===null?'—':toMoney(m.rph); kpiRpkm.textContent=m.rpkm===null?'—':toMoney(m.rpkm); kpiNet.textContent=toMoney(m.net);
+  if(hasShift){ const p=state.currentShift.platforms||{}; kpiUber.textContent=toMoney(Number(p.uber||0)); kpiPop.textContent=toMoney(Number(p.n99||0)); kpiKm.textContent=String(m.km); } else { kpiUber.textContent='—'; kpiPop.textContent='—'; kpiKm.textContent='—'; }
+  const shiftBtn=document.getElementById('shiftBtn'); const breakBtn=document.getElementById('breakBtn');
+  if(!hasShift||ended){ shiftBtn.textContent='⏺️ Iniciar'; breakBtn.textContent='⏸️ Pausa'; breakBtn.disabled=true; }
+  else { shiftBtn.textContent='⏹️ Encerrar'; breakBtn.textContent=paused?'▶️ Retomar':'⏸️ Pausa'; breakBtn.disabled=false; }
+}
+function handleCommandCore(text){
+  const raw=String(text||''); const t=(raw.toLowerCase()).normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+  if(/^reset(ar)?$/.test(t)||/limpar tudo|apagar tudo/.test(t)){ state={currentShift:null,history:[]}; save(); addMsg('🧹 Dados apagados.'); updateStatus(); return; }
+  if(/^(status|como estou|resumo)$/.test(t)){ const m=computeMetrics(state.currentShift); addMsg(`🧭 Turno: <b>${state.currentShift?(state.currentShift.endISO?'encerrado':'em andamento'):'sem turno'}</b><br>🕓 Horas (sem pausas): <b>${fmtHHMM(m.hours)}</b><br>💵 Bruto: <b>${toMoney(m.gross)}</b> — ⚙️ Custos: <b>${toMoney(m.cost)}</b> — 💰 Líquido: <b>${toMoney(m.net)}</b><br>📈 R$/h: <b>${m.rph?toMoney(m.rph):'—'}</b> — 🧮 R$/km: <b>${m.rpkm?toMoney(m.rpkm):'—'}</b>`); updateStatus(); return; }
+  if(/inici(ando|ar) turno/.test(t)){ const time=parseTime(t)||new Date(); state.currentShift={ startISO:time.toISOString(), endISO:null, odoStart:null, odoEnd:null, gross:0, costs:[], notes:[], kmManual:0, kmSet:0, breaks:[], platforms:{uber:0,n99:0,indrive:0}, paused:false }; save(); addMsg(`✅ Turno iniciado às <b>${time.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</b>.`); updateStatus(); return; }
+  if(/finaliz(and|ar)o? turno|encerrar turno|fim do turno/.test(t)){ if(!state.currentShift){ addMsg('ℹ️ Nenhum turno em andamento.'); return; } const time=parseTime(t)||new Date(); const open=(state.currentShift.breaks||[]).find(b=>!b.endISO); if(open) open.endISO=time.toISOString(); state.currentShift.endISO=time.toISOString(); state.history.push(state.currentShift); save(); const m=computeMetrics(state.currentShift); addMsg(`🛑 Turno encerrado às <b>${time.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</b>.<br>Resumo: 🕓 <b>${fmtHHMM(m.hours)}</b> | 💰 <b>${toMoney(m.net)}</b> | 📈 R$/h <b>${m.rph?toMoney(m.rph):'—'}</b> | 🧮 R$/km <b>${m.rpkm?toMoney(m.rpkm):'—'}</b>.`); state.currentShift=null; save(); updateStatus(); return; }
+  if(/^(pausa|pausar|pausa para|pausando)/.test(t)){ if(!state.currentShift){ addMsg('ℹ️ Inicie um turno primeiro.'); return; } const time=parseTime(t)||new Date(); state.currentShift.breaks=state.currentShift.breaks||[]; const open=state.currentShift.breaks.find(b=>!b.endISO); if(open){ addMsg('⏸️ Já há uma pausa em andamento. Diga “Retomar”.'); return; } state.currentShift.breaks.push({startISO:time.toISOString(), endISO:null, note:raw}); state.currentShift.paused=true; save(); addMsg(`⏸️ Pausa iniciada às <b>${time.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</b>.`); updateStatus(); return; }
+  if(/^(retomar|voltar|continuar|fim da pausa)/.test(t)){ if(!state.currentShift){ addMsg('ℹ️ Inicie um turno primeiro.'); return; } const time=parseTime(t)||new Date(); const open=(state.currentShift.breaks||[]).find(b=>!b.endISO); if(!open){ addMsg('ℹ️ Não há pausa em andamento.'); return; } open.endISO=time.toISOString(); state.currentShift.paused=false; save(); addMsg(`▶️ Retomou às <b>${time.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}</b>.`); updateStatus(); return; }
+  // Hodômetro
+  if(/(odo|hodo|odometro|hodometro)/.test(t)&&/inicial|comeco|começo|start/.test(t)){ const num=parseInt(((t.match(/\d+/)||[])[0]||''),10); if(!state.currentShift){ addMsg('ℹ️ Inicie um turno primeiro.'); return; } if(isNaN(num)){ addMsg('❓ Não entendi o valor do hodômetro inicial.'); return; } state.currentShift.odoStart=num; save(); addMsg(`📏 Odômetro inicial: <b>${num}</b>.`); updateStatus(); return; }
+  if(/(odo|hodo|odometro|hodometro)/.test(t)&&/(final|fim|end)/.test(t)){ const num=parseInt(((t.match(/\d+/)||[])[0]||''),10); if(!state.currentShift){ addMsg('ℹ️ Inicie um turno primeiro.'); return; } if(isNaN(num)){ addMsg('❓ Não entendi o valor do hodômetro final.'); return; } state.currentShift.odoEnd=num; save(); addMsg(`📏 Odômetro final: <b>${num}</b>.`); updateStatus(); return; }
+  // KM manual (incremental)
+  if(((/rode[iu]?|andei|percorri|dirigi|\bkm\b|quilometro|quilometros|quilômetro|quilômetros/.test(t))&&/\d/.test(t))&&!/^(km|kms|quilometros|quilometros|quilômetros)\b/.test(t)){
+    const nm=parseNumberBR(t); if(!state.currentShift){ addMsg('ℹ️ Inicie um turno primeiro.'); return; } if(nm==null){ addMsg('❓ Não entendi os km.'); return; } state.currentShift.kmManual=(state.currentShift.kmManual||0)+nm; save(); addMsg(`🚗 Km acumulado: <b>${state.currentShift.kmManual}</b>.`); updateStatus(); return; }
+  // KM SET
+  if(/^(km|kms|quilometros|quilometros|quilômetros)\b/.test(t)&&/\d/.test(t)){
+    if(!state.currentShift){ addMsg('ℹ️ Inicie um turno antes.'); return; } if(state.currentShift.endISO){ addMsg('⛔ Turno encerrado. Reinicie para lançar valores.'); return; }
+    const breakOpenLocal=(state.currentShift.breaks||[]).some(b=>!b.endISO); if(state.currentShift.paused||breakOpenLocal){ addMsg('⛔ Turno pausado. Retome para atualizar valores.'); return; }
+    const cleaned=raw.replace(/^(km|kms|quilometros|quilometros|quilômetros)\b/i,''); const val=parseNumberBR(cleaned); if(val==null||isNaN(val)){ addMsg('❓ Não entendi os KM. Ex.: <b>KM 80</b>.'); return; }
+    const prev=Number(state.currentShift.kmSet||0); if(val<prev){ const ok=window.confirm(`Novo KM menor que o anterior (${prev} → ${val}). Confirmar?`); if(!ok){ return; } }
+    state.currentShift.kmSet=val; save(); updateStatus(); return; }
+  // Saldos plataformas (Uber / Pop|Cop|Top|99)
+  if(/\b(uber|pop|cop|top|99)\b/.test(t)&&/\d/.test(t)&&!/(ganhei|ganho|ganhar|corrida|recebi)/.test(t)){
+    if(!state.currentShift){ addMsg('ℹ️ Inicie um turno antes.'); return; } if(state.currentShift.endISO){ addMsg('⛔ Turno encerrado. Reinicie para lançar valores.'); return; }
+    const breakOpenLocal=(state.currentShift.breaks||[]).some(b=>!b.endISO); if(state.currentShift.paused||breakOpenLocal){ addMsg('⛔ Turno pausado. Retome para atualizar saldos.'); return; }
+    const isUber=/\buber\b/.test(t); const cleaned=raw.replace(/\b(uber|pop|cop|top|99)\b/gi,''); const val=parseNumberBR(cleaned); if(val==null||isNaN(val)){ addMsg('❓ Não entendi o valor. Exemplos: <b>Uber 90</b> ou <b>Pop 45</b>.'); return; }
+    if(!state.currentShift.platforms) state.currentShift.platforms={uber:0,n99:0,indrive:0}; const key=isUber?'uber':'n99'; const prev=Number(state.currentShift.platforms[key]||0); if(val<prev){ const ok=window.confirm(`Novo saldo de ${key==='n99'?'Pop':'Uber'} menor que o anterior (${toMoney(prev)} → ${toMoney(val)}). Confirmar?`); if(!ok){ return; } }
+    state.currentShift.platforms[key]=val; const p=state.currentShift.platforms; state.currentShift.gross=Number(p.uber||0)+Number(p.n99||0)+Number(p.indrive||0); save(); updateStatus(); return; }
+  if((/(ganhei|ganho|ganhar|corrida|recebi|bruto)\b/.test(t)||/^r\$\s*\d/.test(t))&&/\d/.test(t)){ addMsg('ℹ️ Use: <b>Uber 90</b>, <b>Pop 45</b> ou <b>KM 80</b>.'); return; }
+  if(/exportar|csv|baixar/.test(t)){ const csv=exportCSV(); download('finandrive_turnos.csv', csv); addMsg('📤 Exportei um arquivo CSV com o histórico.'); return; }
+  addMsg('🤔 Exemplos: “Uber 90”, “Pop 45”, “KM 80”, “Pausa 08:20”, “Status”, “Exportar”.');
+}
+function exportCSV(){ const rows=[[ 'data','inicio','fim','horas_liquidas_dec','horas_liquidas_hhmm','odo_inicial','odo_final','km','bruto','custos','liquido','rph','rpkm','pausas' ]]; const all=[...state.history]; if(state.currentShift) all.push(state.currentShift); all.forEach(s=>{ const m=computeMetrics(s); const start=new Date(s.startISO); const end=s.endISO?new Date(s.endISO):null; const pauses=(s.breaks||[]).map(b=>{ const bs=new Date(b.startISO).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); const be=b.endISO?new Date(b.endISO).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : ''; return bs+'-'+be; }).join('|'); rows.push([ start.toLocaleDateString('pt-BR'), start.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}), end? end.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : '', m.hours.toFixed(2), fmtHHMM(m.hours), s.odoStart || '', s.odoEnd || '', m.km, s.gross.toFixed(2), s.costs.reduce((x,c)=>x+c.value,0).toFixed(2), m.net.toFixed(2), m.rph? m.rph.toFixed(2) : '', m.rpkm? m.rpkm.toFixed(2) : '', pauses ]); }); return rows.map(r=>r.map(v=>'"'+String(v).replaceAll('"','\"')+'"').join(',')).join('\n'); }
+function download(filename,text){ const blob=new Blob([text],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url); }
+
+function handleCommand(text){
+  const raw = String(text || '');
+  const lower = raw.toLowerCase();
+  const beforeHistoryLen = Array.isArray(state.history) ? state.history.length : 0;
+
+  handleCommandCore(text);
+
+  // Depois que o comando original rodar, decidimos o que sincronizar
+  try {
+    if (/inici(ando|ar) turno/.test(lower)) {
+      if (state.currentShift) {
+        syncShiftToCloud(state.currentShift).catch(()=>{});
+      }
+    } else if (/finaliz(and|ar)o? turno|encerrar turno|fim do turno/.test(lower)) {
+      let target = null;
+      if (Array.isArray(state.history) && state.history.length > 0) {
+        if (state.history.length > beforeHistoryLen) {
+          target = state.history[state.history.length - 1];
+        } else {
+          target = state.history[state.history.length - 1];
+        }
+      }
+      if (!target && state.currentShift) {
+        target = state.currentShift;
+      }
+      if (target) {
+        syncShiftToCloud(target, { isEnd: true }).catch(()=>{});
+      }
+    }
+  } catch (e) {
+    console.warn('Erro na camada de sincronização pós-comando', e);
+  }
+}
+const shiftBtn=document.getElementById('shiftBtn'); const breakBtn=document.getElementById('breakBtn');
+shiftBtn.addEventListener('click', ()=>{ if(state.currentShift && !state.currentShift.endISO){ handleCommand('finalizar turno'); } else { handleCommand('iniciando turno'); } });
+breakBtn.addEventListener('click', ()=>{ if(!state.currentShift || state.currentShift.endISO){ return; } const pausedFlag=state.currentShift.paused||(state.currentShift.breaks||[]).some(b=>!b.endISO); handleCommand(pausedFlag ? 'retomar' : 'pausa'); });
+let rec=null, listening=false; const micBtn=document.getElementById('micBtn');
+micBtn.addEventListener('click', ()=>{ const SR=window.SpeechRecognition||window.webkitSpeechRecognition; if(!SR){ addMsg('Seu navegador não suporta voz.'); return; } if(listening){ try{rec&&rec.stop();}catch{}; listening=false; micBtn.textContent='🎙️ Voz'; return; } rec=new SR(); rec.lang='pt-BR'; rec.interimResults=false; rec.maxAlternatives=1; rec.onresult=(ev)=>{ const txt=ev.results[0][0].transcript; addMsg(txt,'user'); handleCommand(txt); }; rec.onend=()=>{ listening=false; micBtn.textContent='🎙️ Voz'; }; rec.onerror=()=>{ listening=false; micBtn.textContent='🎙️ Voz'; }; rec.start(); listening=true; micBtn.textContent='■ Gravando'; });
+document.getElementById('form').addEventListener('submit', (e)=>{ e.preventDefault(); const inp=document.getElementById('input'); const txt=(inp.value||'').trim(); if(!txt) return; addMsg(txt,'user'); handleCommand(txt); inp.value=''; });
+updateStatus(); setInterval(updateStatus,60000);
+
+try {
+  if (window.addEventListener) {
+    window.addEventListener('online', function(){
+      syncPendingShifts();
+    });
+  }
+  // pequena tentativa automática alguns segundos depois do carregamento
+  setTimeout(function(){
+    syncPendingShifts();
+  }, 8000);
+} catch (e) {
+  console.warn('Falha ao agendar sincronização inicial', e);
+}
+</script>
+</body>
+</html>
