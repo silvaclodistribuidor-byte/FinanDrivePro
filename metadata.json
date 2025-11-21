@@ -1,0 +1,5 @@
+{
+  "name": "FinanDrive - Driver Assistant",
+  "description": "An intelligent assistant for ride-sharing drivers to track shifts, earnings, and performance metrics using a conversational interface powered by Gemini.",
+  "requestFramePermissions": []
+}
