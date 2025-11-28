@@ -7,30 +7,34 @@ export interface AppPersistedData {
   transactions: Transaction[];
   bills: Bill[];
   categories: string[];
+  ownerUid?: string; // quem é o dono desse driver (auth.uid)
 }
 
-// Por enquanto um único driver fixo.
-// Depois trocamos isso por um ID para cada motorista.
-const DRIVER_DOC_ID = "defaultDriver";
-
-export async function loadAppData(): Promise<AppPersistedData | null> {
-  const ref = doc(db, "drivers", DRIVER_DOC_ID);
+// Carrega dados do motorista
+export async function loadAppData(driverId: string): Promise<AppPersistedData | null> {
+  const ref = doc(db, "drivers", driverId);
   const snap = await getDoc(ref);
 
   if (!snap.exists()) {
     return null;
   }
 
-  const data = snap.data() as Partial<AppPersistedData>;
-
-  return {
-    transactions: data.transactions ?? [],
-    bills: data.bills ?? [],
-    categories: data.categories ?? []
-  };
+  return snap.data() as AppPersistedData;
 }
 
-export async function saveAppData(data: AppPersistedData): Promise<void> {
-  const ref = doc(db, "drivers", DRIVER_DOC_ID);
-  await setDoc(ref, data, { merge: true });
+// Salva dados do motorista
+export async function saveAppData(
+  driverId: string,
+  data: Omit<AppPersistedData, "ownerUid">,
+  ownerUid: string
+): Promise<void> {
+  const ref = doc(db, "drivers", driverId);
+  await setDoc(
+    ref,
+    {
+      ...data,
+      ownerUid,
+    },
+    { merge: true }
+  );
 }
