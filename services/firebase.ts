@@ -1,19 +1,23 @@
+// services/firebase.ts
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
-// COPIE aqui o firebaseConfig que o Firebase te mostrou
-// na tela "Adicionar o Firebase ao seu app da Web".
+// Config copiado do Firebase Console (Web app)
 const firebaseConfig = {
-  apiKey: "AIzaSyB1xmsdfr_na3A1K5XV4lMAdaS7M7kl1AU",
+  apiKey: "AIzaSyB1xmsdfr_na3AlK5V4LMAdaS7MK1lAU",
   authDomain: "finandrivepro.firebaseapp.com",
   projectId: "finandrivepro",
   storageBucket: "finandrivepro.firebasestorage.app",
   messagingSenderId: "86863147892",
-  appId: "1:86863147892:web:ccb9b482c1086817b63221"
+  appId: "1:86863147892:web:ccb9b482e1086817b63221",
 };
 
-// Inicializa o app Firebase
+// Inicializa app
 const app = initializeApp(firebaseConfig);
 
-// Exporta a instância do Firestore para usar no resto do app
+// Firestore
 export const db = getFirestore(app);
+
+// Auth (vamos usar login anônimo)
+export const auth = getAuth(app);
