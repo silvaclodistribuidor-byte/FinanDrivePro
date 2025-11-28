@@ -592,14 +592,6 @@ function App() {
     setTempDriverId("");
   };
 
-  if (!authReady) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-slate-900 text-white">
-        <p>Conectando ao servidor...</p>
-      </div>
-    );
-  }
-
   if (!driverId) {
     return (
       <div className="h-screen flex items-center justify-center bg-slate-900 text-white px-4">
