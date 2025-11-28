@@ -144,29 +144,33 @@ function App() {
 
   const timerRef = useRef<number | null>(null);
 
-  // 🔹 Carrega transações do Firestore ao iniciar o app
+  // 🔹 Carrega transações do Firestore ao abrir o app
   useEffect(() => {
     const fetchData = async () => {
       const data = await loadDriverData();
-      if (data && data.transactions) {
+      if (data && data.transactions && data.transactions.length > 0) {
         setTransactions(data.transactions);
+      } else {
+        // se não tiver nada no banco ainda, usa os exemplos iniciais
+        setTransactions(INITIAL_TRANSACTIONS);
+        await saveTransactions(INITIAL_TRANSACTIONS);
       }
     };
 
     fetchData();
   }, []);
 
-  // 🔹 Cronômetro do turno (já era seu código original)
+  // 🔹 Cronômetro do turno
   useEffect(() => {
     if (shiftState.isActive && !shiftState.isPaused) {
       timerRef.current = window.setInterval(() => {
         setShiftState(prev => ({ ...prev, elapsedSeconds: prev.elapsedSeconds + 1 }));
       }, 1000);
     } else {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) window.clearInterval(timerRef.current);
     }
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) window.clearInterval(timerRef.current);
     };
   }, [shiftState.isActive, shiftState.isPaused]);
 
@@ -430,7 +434,6 @@ function App() {
       id: Math.random().toString(36).substr(2, 9),
       ...data
     };
-
     setTransactions(prev => {
       const updated = [newTransaction, ...prev];
       saveTransactions(updated);
@@ -893,4 +896,287 @@ function App() {
                          <div key={bill.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-100">
                              <div>
                                  <p className="text-sm font-semibold text-slate-700">{bill.description}</p>
-                                 <p className="text-xs text-rose-500 font-medium">Vence: {formatDateBr(bill.dueDate
+                                 <p className="text-xs text-rose-500 font-medium">Vence: {formatDateBr(bill.dueDate)}</p>
+                             </div>
+                             <span className="text-sm font-bold text-slate-800">{formatCurrency(bill.amount)}</span>
+                         </div>
+                     ))}
+                     {bills.filter(b => !b.isPaid).length === 0 && (
+                         <p className="text-center text-xs text-slate-400 py-4">Tudo pago! 🎉</p>
+                     )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'reports' && (
+            <ReportsTab transactions={transactions} showValues={showValues} />
+        )}
+
+        {activeTab === 'bills' && (
+             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                 <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                     <div>
+                         <h2 className="text-lg font-bold text-slate-800">Contas a Pagar</h2>
+                         <p className="text-slate-500 text-sm">Gerencie suas obrigações futuras e mantenha o caixa positivo.</p>
+                     </div>
+                     <button 
+                        onClick={() => { setEditingBill(null); setIsBillModalOpen(true); }}
+                        className="flex items-center gap-2 bg-rose-600 text-white px-4 py-2 rounded-lg hover:bg-rose-700 transition-colors shadow-lg shadow-rose-200"
+                     >
+                         <Plus size={16} /> Adicionar Conta
+                     </button>
+                 </div>
+
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {bills.map(bill => (
+                        <div key={bill.id} className={`p-5 rounded-xl border transition-all ${bill.isPaid ? 'bg-slate-50 border-slate-200 opacity-75' : 'bg-white border-rose-100 shadow-sm'}`}>
+                            <div className="flex justify-between items-start mb-3">
+                                <div className={`p-2 rounded-lg ${bill.isPaid ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                                    {bill.isPaid ? <Wallet size={20} /> : <CalendarClock size={20} />}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className={`text-lg font-bold ${bill.isPaid ? 'text-slate-500' : 'text-slate-800'}`}>
+                                        {formatCurrency(bill.amount)}
+                                    </span>
+                                    <div className="flex">
+                                        <button
+                                            onClick={() => handleEditBill(bill)}
+                                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"
+                                            title="Editar conta"
+                                        >
+                                            <Edit2 size={18} />
+                                        </button>
+                                        <button 
+                                          onClick={() => handleDeleteBill(bill.id)}
+                                          className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-colors"
+                                          title="Excluir conta"
+                                        >
+                                          <Trash2 size={18} />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="mb-1">
+                                <h4 className={`font-semibold ${bill.isPaid ? 'text-slate-500 line-through' : 'text-slate-800'}`}>
+                                    {bill.description}
+                                </h4>
+                                {bill.category && (
+                                    <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">
+                                        {bill.category}
+                                    </span>
+                                )}
+                            </div>
+                            <div className="flex justify-between items-center mt-4">
+                                <span className="text-xs text-slate-500">
+                                    Vencimento: {formatDateBr(bill.dueDate)}
+                                </span>
+                                <button 
+                                    onClick={() => toggleBillPaid(bill.id)}
+                                    className={`text-xs px-3 py-1 rounded-full border transition-colors ${
+                                        bill.isPaid 
+                                        ? 'border-emerald-200 text-emerald-600 hover:bg-emerald-50' 
+                                        : 'border-slate-200 text-slate-600 hover:bg-slate-100'
+                                    }`}
+                                >
+                                    {bill.isPaid ? 'Marcar como Pendente' : 'Marcar como Pago'}
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                 </div>
+             </div>
+        )}
+
+        {activeTab === 'history' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* Header & Filter Controls */}
+            <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                        <History className="text-indigo-600" /> Histórico de Transações
+                        </h2>
+                    </div>
+                    
+                    <div className="flex bg-slate-100 p-1 rounded-xl overflow-x-auto max-w-full">
+                        {(['today', 'week', 'month', 'all', 'custom'] as const).map((range) => (
+                        <button
+                            key={range}
+                            onClick={() => setHistoryRange(range)}
+                            className={`px-3 py-1.5 text-xs md:text-sm font-medium rounded-lg transition-all whitespace-nowrap ${
+                            historyRange === range 
+                                ? 'bg-white text-indigo-600 shadow-sm' 
+                                : 'text-slate-500 hover:text-slate-700'
+                            }`}
+                        >
+                            {range === 'today' && 'Hoje'}
+                            {range === 'week' && 'Semana'}
+                            {range === 'month' && 'Mês'}
+                            {range === 'all' && 'Tudo'}
+                            {range === 'custom' && 'Outro'}
+                        </button>
+                        ))}
+                    </div>
+                </div>
+
+                {historyRange === 'custom' && (
+                    <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200 justify-center animate-in fade-in slide-in-from-top-2 mb-4">
+                        <input 
+                        type="date" 
+                        value={historyCustomStart}
+                        onChange={(e) => setHistoryCustomStart(e.target.value)}
+                        className="px-2 py-1.5 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-full md:w-auto"
+                        />
+                        <span className="text-slate-400"><ChevronRight size={16} /></span>
+                        <input 
+                        type="date" 
+                        value={historyCustomEnd}
+                        onChange={(e) => setHistoryCustomEnd(e.target.value)}
+                        className="px-2 py-1.5 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500 w-full md:w-auto"
+                        />
+                    </div>
+                )}
+
+                {/* Summary Cards */}
+                <div className="grid grid-cols-3 gap-2 md:gap-4 mt-2">
+                     <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100 text-center">
+                        <div className="text-xs text-emerald-600 font-bold uppercase mb-1 flex justify-center items-center gap-1"><ArrowUpCircle size={12}/> Entradas</div>
+                        <div className="text-sm md:text-lg font-bold text-emerald-700">{formatCurrency(historySummary.income)}</div>
+                     </div>
+                     <div className="bg-rose-50 p-3 rounded-xl border border-rose-100 text-center">
+                        <div className="text-xs text-rose-600 font-bold uppercase mb-1 flex justify-center items-center gap-1"><ArrowDownCircle size={12}/> Saídas</div>
+                        <div className="text-sm md:text-lg font-bold text-rose-700">{formatCurrency(historySummary.expense)}</div>
+                     </div>
+                     <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                        <div className="text-xs text-slate-600 font-bold uppercase mb-1">Saldo</div>
+                        <div className={`text-sm md:text-lg font-bold ${historySummary.balance >= 0 ? 'text-indigo-600' : 'text-rose-600'}`}>{formatCurrency(historySummary.balance)}</div>
+                     </div>
+                </div>
+            </div>
+
+            {/* Responsive Table/List */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                {/* Desktop Table Header (Hidden on Mobile) */}
+                <div className="hidden md:grid grid-cols-12 bg-slate-50 border-b border-slate-200 p-4 text-xs font-semibold text-slate-500 uppercase">
+                    <div className="col-span-2">Data</div>
+                    <div className="col-span-4">Descrição</div>
+                    <div className="col-span-2">Categoria</div>
+                    <div className="col-span-2">Eficiência</div>
+                    <div className="col-span-1 text-right">Valor</div>
+                    <div className="col-span-1 text-center">Ações</div>
+                </div>
+
+                <div className="divide-y divide-slate-100">
+                    {filteredHistory.length === 0 ? (
+                        <div className="p-8 text-center text-slate-400">
+                            <Filter size={48} className="mx-auto mb-2 opacity-20" />
+                            <p>Nenhuma transação encontrada neste período.</p>
+                        </div>
+                    ) : (
+                        filteredHistory.map(t => (
+                            <div key={t.id} className="hover:bg-slate-50 transition-colors">
+                                {/* Desktop Row */}
+                                <div className="hidden md:grid grid-cols-12 items-center p-4 text-sm">
+                                    <div className="col-span-2 text-slate-600">{formatDateBr(t.date)}</div>
+                                    <div className="col-span-4 font-medium text-slate-800">{t.description}</div>
+                                    <div className="col-span-2">
+                                        <span className={`px-2 py-1 rounded text-xs border ${t.category ? 'bg-slate-100 text-slate-600 border-slate-200' : 'bg-emerald-100 text-emerald-700 border-emerald-200'}`}>
+                                            {t.category || 'Entrada'}
+                                        </span>
+                                    </div>
+                                    <div className="col-span-2 text-slate-500 text-xs">
+                                        {t.mileage ? `${t.mileage}km • ${t.durationHours}h` : '-'}
+                                    </div>
+                                    <div className={`col-span-1 font-bold text-right ${t.type === TransactionType.INCOME ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                        {t.type === TransactionType.INCOME ? '+' : '-'} {formatCurrency(t.amount)}
+                                    </div>
+                                    <div className="col-span-1 text-center">
+                                        <button onClick={() => handleDeleteTransaction(t.id)} className="text-slate-400 hover:text-rose-500 p-1">
+                                            <CloseIcon size={16} />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Mobile Row (Compact) */}
+                                <div className="md:hidden p-4 flex justify-between items-center">
+                                    <div className="flex-1 min-w-0 pr-4">
+                                        <div className="font-semibold text-slate-800 truncate mb-1">{t.description}</div>
+                                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                                            <span>{formatDateBr(t.date)}</span>
+                                            <span>•</span>
+                                            <span className={`px-1.5 py-0.5 rounded ${t.type === TransactionType.INCOME ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                                                {t.category || 'Entrada'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <div className={`font-bold ${t.type === TransactionType.INCOME ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                            {t.type === TransactionType.INCOME ? '+' : '-'} {formatCurrency(t.amount)}
+                                        </div>
+                                        <button onClick={() => handleDeleteTransaction(t.id)} className="text-slate-300 hover:text-rose-500 p-1">
+                                            <Trash2 size={18} />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      <TransactionModal 
+        isOpen={isTransModalOpen} 
+        onClose={() => setIsTransModalOpen(false)} 
+        onSave={handleAddTransaction}
+        onSaveBill={handleSaveBill}
+        categories={categories}
+      />
+      
+      <ShiftModal
+        isOpen={isShiftModalOpen}
+        onClose={() => setIsShiftModalOpen(false)}
+        onSave={handleSaveShift}
+        initialData={shiftState.isActive || shiftState.isPaused ? {
+          amount: currentShiftTotal,
+          mileage: shiftState.km,
+          durationHours: currentShiftHoursPrecise
+        } : null}
+      />
+
+      <ShiftEntryModal 
+        isOpen={entryModalOpen}
+        onClose={() => setEntryModalOpen(false)}
+        category={entryCategory}
+        onSave={handleEntrySave}
+        categories={categories}
+      />
+
+      <BillModal
+        isOpen={isBillModalOpen}
+        onClose={() => { setIsBillModalOpen(false); setEditingBill(null); }}
+        onSave={handleSaveBill}
+        initialData={editingBill}
+        categories={categories}
+      />
+
+      <SettingsModal
+         isOpen={isSettingsModalOpen}
+         onClose={() => setIsSettingsModalOpen(false)}
+         workDays={workDays}
+         onSaveWorkDays={setWorkDays}
+         categories={categories}
+         onAddCategory={handleAddCategory}
+         onEditCategory={handleEditCategory}
+         onDeleteCategory={handleDeleteCategory}
+      />
+    </div>
+  );
+}
+
+export default App;
