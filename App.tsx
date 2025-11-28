@@ -36,16 +36,16 @@ import { ShiftEntryModal } from "./components/ShiftEntryModal";
 import { BillModal } from "./components/BillModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { ReportsTab } from "./components/ReportsTab";
+import {
+  Transaction,
+  TransactionType,
+  ExpenseCategory,
+  Bill,
+  ShiftState,
+  DEFAULT_CATEGORIES,
+} from "./types";
 
-import { Transaction, TransactionType, ExpenseCategory, Bill, ShiftState, DEFAULT_CATEGORIES } from "./types";
-
-// Firestore (novo)
-import { loadAppData, saveAppData } from "./services/firestoreService";
-// Auth Firebase (novo)
-import { auth } from "./services/firebase";
-import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
-
-// --- Date Helpers to Fix Timezone Issues ---
+// --- Date Helpers ---
 const getTodayString = () => {
   const now = new Date();
   return [
@@ -67,7 +67,6 @@ const getFutureDateString = (daysToAdd: number) => {
 
 const parseDateFromInput = (dateStr: string) => {
   if (!dateStr) return new Date();
-  // Force Local Time construction: YYYY, MM-1, DD
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(y, m - 1, d);
 };
@@ -80,12 +79,19 @@ const formatDateBr = (dateStr: string) => {
 
 // --- Chart Helpers ---
 const RADIAN = Math.PI / 180;
-const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+const renderCustomizedLabel = ({
+  cx,
+  cy,
+  midAngle,
+  innerRadius,
+  outerRadius,
+  percent,
+}: any) => {
   const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
   const x = cx + radius * Math.cos(-midAngle * RADIAN);
   const y = cy + radius * Math.sin(-midAngle * RADIAN);
 
-  if (percent < 0.05) return null; // Don't show label for tiny slices
+  if (percent < 0.05) return null;
 
   return (
     <text
@@ -101,7 +107,7 @@ const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, per
   );
 };
 
-// --- Initial Data (Dynamic based on Today) ---
+// --- Dados iniciais (dinâmicos) ---
 const INITIAL_TRANSACTIONS: Transaction[] = [
   {
     id: "1",
@@ -159,42 +165,34 @@ const INITIAL_BILLS: Bill[] = [
 ];
 
 function App() {
+  // --- Estados principais ---
   const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
   const [bills, setBills] = useState<Bill[]>(INITIAL_BILLS);
   const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
 
-  // --- Identificação do motorista / auth ---
-  const [driverId, setDriverId] = useState<string | null>(null);
-  const [tempDriverId, setTempDriverId] = useState("");
-  const [authReady, setAuthReady] = useState(false);
-  const [loadingData, setLoadingData] = useState(false);
-  const [driverError, setDriverError] = useState<string | null>(null);
-
-  // Default to Mon-Sat (1-6). Sunday (0) is off by default to match driver scenario.
+  // Dias de trabalho (1-6 = seg-sáb)
   const [workDays, setWorkDays] = useState<number[]>([1, 2, 3, 4, 5, 6]);
-  const [showValues, setShowValues] = useState(true);
 
-  const [activeTab, setActiveTab] = useState<"dashboard" | "bills" | "history" | "shift" | "reports">(
-    "dashboard"
-  );
+  const [showValues, setShowValues] = useState(true);
+  const [activeTab, setActiveTab] = useState<
+    "dashboard" | "bills" | "history" | "shift" | "reports"
+  >("dashboard");
+
   const [isTransModalOpen, setIsTransModalOpen] = useState(false);
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
-
-  // Bill Modal & Edit State
   const [isBillModalOpen, setIsBillModalOpen] = useState(false);
   const [editingBill, setEditingBill] = useState<Bill | null>(null);
-
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // --- History Filter State ---
-  const [historyRange, setHistoryRange] = useState<"today" | "week" | "month" | "all" | "custom">(
-    "all"
-  );
+  // --- Filtro do Histórico ---
+  const [historyRange, setHistoryRange] = useState<
+    "today" | "week" | "month" | "all" | "custom"
+  >("all");
   const [historyCustomStart, setHistoryCustomStart] = useState("");
   const [historyCustomEnd, setHistoryCustomEnd] = useState("");
 
-  // --- Shift Logic ---
+  // --- Turno ---
   const [shiftState, setShiftState] = useState<ShiftState>({
     isActive: false,
     isPaused: false,
@@ -212,99 +210,88 @@ function App() {
   >(null);
 
   const timerRef = useRef<number | null>(null);
-  const hasLoadedFromDb = useRef(false);
 
-  // --------- AUTENTICAÇÃO + DRIVER ID + FIRESTORE ---------
+  // --- Motorista / Driver ---
+  const [driverId, setDriverId] = useState<string | null>(null);
+  const [tempDriverId, setTempDriverId] = useState("");
+  const [driverError, setDriverError] = useState<string | null>(null);
 
-  // Login anônimo
+  // Carrega driverId salvo
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => {
-      if (!user) {
-        signInAnonymously(auth).catch((err) => {
-          console.error("Erro ao fazer login anônimo:", err);
-        });
-      } else {
-        setAuthReady(true);
+    try {
+      const saved = localStorage.getItem("finandrivepro_driver_id");
+      if (saved) {
+        setDriverId(saved);
+        setTempDriverId(saved);
       }
-    });
-
-    return () => unsub();
-  }, []);
-
-  // Carrega driverId salvo no navegador
-  useEffect(() => {
-    const stored = localStorage.getItem("finandrive_driver_id");
-    if (stored) {
-      setDriverId(stored);
-      setTempDriverId(stored);
+    } catch (err) {
+      console.error("Erro ao ler driver_id armazenado", err);
     }
   }, []);
 
-  // Carrega dados do Firestore quando tiver auth + driverId
+  // Carrega dados do motorista quando driverId muda
   useEffect(() => {
-    if (!authReady || !driverId) return;
+    if (!driverId) return;
 
-    setLoadingData(true);
-    setDriverError(null);
+    try {
+      const raw = localStorage.getItem(`finandrivepro_data_${driverId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
 
-    (async () => {
-      try {
-        const remote = await loadAppData(driverId);
-        if (remote) {
-          if (remote.transactions?.length) setTransactions(remote.transactions);
-          if (remote.bills?.length) setBills(remote.bills);
-          if (remote.categories?.length) setCategories(remote.categories);
-        } else {
-          // Primeira vez desse motorista: salva dados iniciais
-          const user = auth.currentUser;
-          const ownerUid = user?.uid || "";
-          await saveAppData(
-            driverId,
-            {
-              transactions: INITIAL_TRANSACTIONS,
-              bills: INITIAL_BILLS,
-              categories: DEFAULT_CATEGORIES,
-            },
-            ownerUid
-          );
-        }
-        hasLoadedFromDb.current = true;
-      } catch (err) {
-        console.error("Erro ao carregar dados:", err);
-        setDriverError("Erro ao carregar os dados deste motorista.");
-      } finally {
-        setLoadingData(false);
+        if (parsed.transactions) setTransactions(parsed.transactions);
+        else setTransactions(INITIAL_TRANSACTIONS);
+
+        if (parsed.bills) setBills(parsed.bills);
+        else setBills(INITIAL_BILLS);
+
+        if (parsed.categories) setCategories(parsed.categories);
+        else setCategories(DEFAULT_CATEGORIES);
+
+        if (parsed.workDays) setWorkDays(parsed.workDays);
+        else setWorkDays([1, 2, 3, 4, 5, 6]);
+
+        return;
       }
-    })();
-  }, [authReady, driverId]);
+    } catch (err) {
+      console.error("Erro ao carregar dados do motorista", err);
+    }
 
-  // Salva no Firestore quando mudar transações/contas/categorias
+    // Se não tinha nada salvo para esse motorista, usamos os padrões
+    setTransactions(INITIAL_TRANSACTIONS);
+    setBills(INITIAL_BILLS);
+    setCategories(DEFAULT_CATEGORIES);
+    setWorkDays([1, 2, 3, 4, 5, 6]);
+  }, [driverId]);
+
+  // Salva dados sempre que algo importante mudar
   useEffect(() => {
-    if (!authReady || !driverId || !hasLoadedFromDb.current) return;
-    const user = auth.currentUser;
-    if (!user) return;
+    if (!driverId) return;
 
-    const ownerUid = user.uid;
+    const payload = {
+      transactions,
+      bills,
+      categories,
+      workDays,
+    };
 
-    saveAppData(
-      driverId,
-      {
-        transactions,
-        bills,
-        categories,
-      },
-      ownerUid
-    ).catch((err) => {
-      console.error("Erro ao salvar dados:", err);
-    });
-  }, [transactions, bills, categories, authReady, driverId]);
+    try {
+      localStorage.setItem(
+        `finandrivepro_data_${driverId}`,
+        JSON.stringify(payload)
+      );
+    } catch (err) {
+      console.error("Erro ao salvar dados do motorista", err);
+    }
+  }, [driverId, transactions, bills, categories, workDays]);
 
-  // --------- SHIFT TIMER ---------
-
+  // --- Timer do turno ---
   useEffect(() => {
     if (shiftState.isActive && !shiftState.isPaused) {
       timerRef.current = window.setInterval(() => {
-        setShiftState((prev) => ({ ...prev, elapsedSeconds: prev.elapsedSeconds + 1 }));
+        setShiftState((prev) => ({
+          ...prev,
+          elapsedSeconds: prev.elapsedSeconds + 1,
+        }));
       }, 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -314,7 +301,7 @@ function App() {
     };
   }, [shiftState.isActive, shiftState.isPaused]);
 
-  // --- Category Management Handlers ---
+  // --- Gestão de categorias ---
   const handleAddCategory = (name: string) => {
     if (name && !categories.includes(name)) {
       setCategories([...categories, name]);
@@ -324,30 +311,33 @@ function App() {
   const handleEditCategory = (oldName: string, newName: string) => {
     if (!newName || categories.includes(newName)) return;
 
-    // Update list
     setCategories((prev) => prev.map((c) => (c === oldName ? newName : c)));
-
-    // Update Transactions
-    setTransactions((prev) => prev.map((t) => (t.category === oldName ? { ...t, category: newName } : t)));
-
-    // Update Bills
-    setBills((prev) => prev.map((b) => (b.category === oldName ? { ...b, category: newName } : b)));
+    setTransactions((prev) =>
+      prev.map((t) => (t.category === oldName ? { ...t, category: newName } : t))
+    );
+    setBills((prev) =>
+      prev.map((b) => (b.category === oldName ? { ...b, category: newName } : b))
+    );
   };
 
   const handleDeleteCategory = (name: string) => {
     setCategories((prev) => prev.filter((c) => c !== name));
   };
 
-  const handleOpenEntry = (category: "uber" | "99" | "indrive" | "private" | "km" | "expense") => {
-    // Prevent entry if not active OR if paused
-    if (!shiftState.isActive || shiftState.isPaused) {
-      return;
-    }
+  // --- Entradas de turno (Uber, 99, etc) ---
+  const handleOpenEntry = (
+    category: "uber" | "99" | "indrive" | "private" | "km" | "expense"
+  ) => {
+    if (!shiftState.isActive || shiftState.isPaused) return;
     setEntryCategory(category);
     setEntryModalOpen(true);
   };
 
-  const handleEntrySave = (value: number, description?: string, expenseCategory?: ExpenseCategory) => {
+  const handleEntrySave = (
+    value: number,
+    description?: string,
+    expenseCategory?: ExpenseCategory
+  ) => {
     if (!entryCategory) return;
 
     setShiftState((prev) => {
@@ -376,7 +366,12 @@ function App() {
   };
 
   const handleStartShift = () => {
-    setShiftState((prev) => ({ ...prev, isActive: true, isPaused: false, startTime: Date.now() }));
+    setShiftState((prev) => ({
+      ...prev,
+      isActive: true,
+      isPaused: false,
+      startTime: Date.now(),
+    }));
   };
 
   const handlePauseShift = () => {
@@ -388,20 +383,22 @@ function App() {
     setIsShiftModalOpen(true);
   };
 
+  // --- Utilitários de formatação ---
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
-    // Removed seconds as requested
     return `${h}h ${m.toString().padStart(2, "0")}m`;
   };
 
   const formatCurrency = (val: number, forceShow = false) => {
     if (!showValues && !forceShow) return "R$ ****";
-    return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(val);
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    }).format(val);
   };
 
-  // --- Logic & Calculations ---
-
+  // --- Estatísticas gerais ---
   const stats = useMemo(() => {
     const totalIncome = transactions
       .filter((t) => t.type === TransactionType.INCOME)
@@ -411,10 +408,17 @@ function App() {
       .filter((t) => t.type === TransactionType.EXPENSE)
       .reduce((acc, curr) => acc + curr.amount, 0);
 
-    // Efficiency Metrics
-    const incomeTransactions = transactions.filter((t) => t.type === TransactionType.INCOME);
-    const totalKm = incomeTransactions.reduce((acc, curr) => acc + (curr.mileage || 0), 0);
-    const totalHours = incomeTransactions.reduce((acc, curr) => acc + (curr.durationHours || 0), 0);
+    const incomeTransactions = transactions.filter(
+      (t) => t.type === TransactionType.INCOME
+    );
+    const totalKm = incomeTransactions.reduce(
+      (acc, curr) => acc + (curr.mileage || 0),
+      0
+    );
+    const totalHours = incomeTransactions.reduce(
+      (acc, curr) => acc + (curr.durationHours || 0),
+      0
+    );
 
     const earningsPerKm = totalKm > 0 ? totalIncome / totalKm : 0;
     const earningsPerHour = totalHours > 0 ? totalIncome / totalHours : 0;
@@ -422,14 +426,19 @@ function App() {
     const netProfit = totalIncome - totalExpense;
     const profitMargin = totalIncome > 0 ? (netProfit / totalIncome) * 100 : 0;
 
-    const pendingBillsTotal = bills.filter((b) => !b.isPaid).reduce((acc, b) => acc + b.amount, 0);
+    const pendingBillsTotal = bills
+      .filter((b) => !b.isPaid)
+      .reduce((acc, b) => acc + b.amount, 0);
 
-    // --- REVISED DAILY GOAL ALGORITHM ---
-    const sortedUnpaidBills = [...bills].filter((b) => !b.isPaid).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    const sortedUnpaidBills = [...bills]
+      .filter((b) => !b.isPaid)
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
     const todayStr = getTodayString();
     const earningsToday = transactions
-      .filter((t) => t.type === TransactionType.INCOME && t.date === todayStr)
+      .filter(
+        (t) => t.type === TransactionType.INCOME && t.date === todayStr
+      )
       .reduce((acc, t) => acc + t.amount, 0);
 
     let maxRequiredDailyRate = 0;
@@ -447,11 +456,10 @@ function App() {
     } else {
       for (const bill of sortedUnpaidBills) {
         cumulativeBillTotal += bill.amount;
-        const totalNeededForThisMilestone = cumulativeBillTotal - startingCash;
+        const totalNeededForThisMilestone =
+          cumulativeBillTotal - startingCash;
 
-        if (totalNeededForThisMilestone <= 0) {
-          continue;
-        }
+        if (totalNeededForThisMilestone <= 0) continue;
 
         const dueDate = parseDateFromInput(bill.dueDate);
         let workingDays = 0;
@@ -471,7 +479,8 @@ function App() {
 
         if (workingDays === 0) workingDays = 1;
 
-        const requiredRateForThisBill = totalNeededForThisMilestone / workingDays;
+        const requiredRateForThisBill =
+          totalNeededForThisMilestone / workingDays;
 
         if (requiredRateForThisBill > maxRequiredDailyRate) {
           maxRequiredDailyRate = requiredRateForThisBill;
@@ -482,7 +491,8 @@ function App() {
     }
 
     if (maxRequiredDailyRate > 0 && !goalExplanation) {
-      goalExplanation = "Calculada para garantir o pagamento de todas as contas.";
+      goalExplanation =
+        "Calculada para garantir o pagamento de todas as contas.";
     }
 
     const dailyGoal = maxRequiredDailyRate;
@@ -501,7 +511,7 @@ function App() {
     };
   }, [transactions, bills, workDays]);
 
-  // --- History Filtering Logic ---
+  // --- Histórico ---
   const filteredHistory = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -528,18 +538,20 @@ function App() {
         end = parseDateFromInput(historyCustomEnd);
         end.setHours(23, 59, 59, 999);
       } else {
-        return transactions; // Show all if dates invalid
+        return transactions;
       }
     } else {
-      return transactions; // 'all'
+      return transactions;
     }
 
     return transactions
       .filter((t) => {
         const tDate = parseDateFromInput(t.date);
-        return start ? tDate >= start && tDate <= (end as Date) : true;
+        return start ? tDate >= start && tDate <= end! : true;
       })
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      .sort(
+        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+      );
   }, [transactions, historyRange, historyCustomStart, historyCustomEnd]);
 
   const historySummary = useMemo(() => {
@@ -552,7 +564,7 @@ function App() {
     return { income, expense, balance: income - expense };
   }, [filteredHistory]);
 
-  // Current Shift Derived Stats
+  // --- Turno atual ---
   const currentShiftTotal =
     shiftState.earnings.uber +
     shiftState.earnings.n99 +
@@ -560,11 +572,16 @@ function App() {
     shiftState.earnings.private;
   const currentShiftLiquid = currentShiftTotal - shiftState.expenses;
   const currentShiftMinutes = Math.floor(shiftState.elapsedSeconds / 60);
-  const currentShiftHoursForRate = currentShiftMinutes > 0 ? currentShiftMinutes / 60 : 0;
-  const currentShiftRph = currentShiftHoursForRate > 0 ? currentShiftTotal / currentShiftHoursForRate : 0;
-  const currentShiftRpk = shiftState.km > 0 ? currentShiftTotal / shiftState.km : 0;
+  const currentShiftHoursForRate =
+    currentShiftMinutes > 0 ? currentShiftMinutes / 60 : 0;
+  const currentShiftRph =
+    currentShiftHoursForRate > 0
+      ? currentShiftTotal / currentShiftHoursForRate
+      : 0;
+  const currentShiftRpk =
+    shiftState.km > 0 ? currentShiftTotal / shiftState.km : 0;
 
-  // Pie Chart Data
+  // --- Dados do gráfico de pizza ---
   const pieData = useMemo(
     () => [
       { name: "Ganhos", value: stats.totalIncome, color: "#3b82f6" },
@@ -573,65 +590,7 @@ function App() {
     [stats]
   );
 
-  // -------- TELA DE SELEÇÃO DE MOTORISTA --------
-
-  const handleSelectDriver = () => {
-    const trimmed = tempDriverId.trim();
-    if (!trimmed) {
-      setDriverError("Informe um código de motorista.");
-      return;
-    }
-    setDriverId(trimmed);
-    localStorage.setItem("finandrive_driver_id", trimmed);
-    setDriverError(null);
-  };
-
-  const handleChangeDriver = () => {
-    localStorage.removeItem("finandrive_driver_id");
-    setDriverId(null);
-    setTempDriverId("");
-  };
-
-  if (!driverId) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-slate-900 text-white px-4">
-        <div className="bg-slate-800 p-6 rounded-2xl w-full max-w-sm shadow-xl border border-slate-700">
-          <h1 className="text-xl font-bold mb-2">FinanDrive</h1>
-          <p className="text-sm text-slate-300 mb-4">
-            Informe um <span className="font-semibold">código de motorista</span> para começar.
-            Cada código tem um banco de dados separado.
-          </p>
-          <input
-            type="text"
-            value={tempDriverId}
-            onChange={(e) => setTempDriverId(e.target.value)}
-            className="w-full mb-3 px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-            placeholder="Ex: motorista01"
-          />
-          {driverError && <p className="text-xs text-rose-400 mb-2">{driverError}</p>}
-          <button
-            onClick={handleSelectDriver}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 text-sm font-semibold py-2 rounded-lg"
-          >
-            Entrar
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (loadingData) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-slate-900 text-white">
-        <p>
-          Carregando dados do motorista <span className="font-semibold">{driverId}</span>...
-        </p>
-      </div>
-    );
-  }
-
-  // -------- INTERFACE PRINCIPAL --------
-
+  // --- Handlers de transações/contas ---
   const handleAddTransaction = (data: any) => {
     const newTransaction: Transaction = {
       id: Math.random().toString(36).substr(2, 9),
@@ -654,16 +613,21 @@ function App() {
       ...data,
     };
 
-    const expenseTransactions: Transaction[] = shiftState.expenseList.map((exp) => ({
-      id: Math.random().toString(36).substr(2, 9),
-      type: TransactionType.EXPENSE,
-      amount: exp.amount,
-      description: `${exp.description} (Turno)`,
-      category: exp.category,
-      date: data.date,
-    }));
+    const expenseTransactions: Transaction[] =
+      shiftState.expenseList.map((exp) => ({
+        id: Math.random().toString(36).substr(2, 9),
+        type: TransactionType.EXPENSE,
+        amount: exp.amount,
+        description: `${exp.description} (Turno)`,
+        category: exp.category,
+        date: data.date,
+      }));
 
-    setTransactions((prev) => [incomeTransaction, ...expenseTransactions, ...prev]);
+    setTransactions((prev) => [
+      incomeTransaction,
+      ...expenseTransactions,
+      ...prev,
+    ]);
 
     setShiftState({
       isActive: false,
@@ -679,10 +643,15 @@ function App() {
 
   const handleSaveBill = (billData: Omit<Bill, "id">) => {
     if (editingBill) {
-      setBills((prev) => prev.map((b) => (b.id === editingBill.id ? { ...b, ...billData } : b)));
+      setBills((prev) =>
+        prev.map((b) => (b.id === editingBill.id ? { ...b, ...billData } : b))
+      );
       setEditingBill(null);
     } else {
-      setBills((prev) => [...prev, { ...billData, id: Math.random().toString(36).substr(2, 9) }]);
+      setBills((prev) => [
+        ...prev,
+        { ...billData, id: Math.random().toString(36).substr(2, 9) },
+      ]);
     }
     setIsBillModalOpen(false);
   };
@@ -693,7 +662,11 @@ function App() {
   };
 
   const toggleBillPaid = (id: string) => {
-    setBills((prev) => prev.map((b) => (b.id === id ? { ...b, isPaid: !b.isPaid } : b)));
+    setBills((prev) =>
+      prev.map((b) =>
+        b.id === id ? { ...b, isPaid: !b.isPaid } : b
+      )
+    );
   };
 
   const handleDeleteBill = (id: string) => {
@@ -704,12 +677,66 @@ function App() {
     setTransactions((prev) => prev.filter((t) => t.id !== id));
   };
 
+  // --- Login / troca de motorista ---
+  const handleDriverSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = tempDriverId.trim();
+    if (!trimmed) {
+      setDriverError("Informe um código ou nome para o motorista.");
+      return;
+    }
+    setDriverId(trimmed);
+    localStorage.setItem("finandrivepro_driver_id", trimmed);
+    setDriverError(null);
+  };
+
+  const handleChangeDriver = () => {
+    localStorage.removeItem("finandrivepro_driver_id");
+    setDriverId(null);
+    setTempDriverId("");
+  };
+
+  // --- Tela de código do motorista ---
+  if (!driverId) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-900 text-white px-4">
+        <div className="bg-slate-800 p-6 rounded-2xl w-full max-w-sm shadow-xl border border-slate-700">
+          <h1 className="text-xl font-bold mb-2">FinanDrive</h1>
+          <p className="text-sm text-slate-300 mb-4">
+            Informe um <span className="font-semibold">código</span> ou{" "}
+            <span className="font-semibold">nome</span> para identificar este
+            motorista. Todos os dados ficarão separados por código.
+          </p>
+          <form onSubmit={handleDriverSubmit} className="space-y-3">
+            <input
+              type="text"
+              value={tempDriverId}
+              onChange={(e) => setTempDriverId(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-600 outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+              placeholder="Ex: motorista_clodoaldo"
+            />
+            {driverError && (
+              <p className="text-xs text-rose-400">{driverError}</p>
+            )}
+            <button
+              type="submit"
+              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 rounded-lg text-sm mt-1"
+            >
+              Entrar
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // --- UI principal ---
   return (
     <div className="h-screen bg-slate-100 flex flex-col md:flex-row font-sans text-slate-900 overflow-hidden">
+      {/* Top bar mobile (exceto no turno) */}
       {activeTab !== "shift" && (
         <div className="md:hidden bg-slate-900 shadow-md p-4 flex justify-between items-center z-30 shrink-0">
           <div className="flex items-center justify-center w-full relative">
-            {/* Mobile Menu Button - Left Aligned relatively */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="absolute left-0 text-slate-300"
@@ -717,9 +744,10 @@ function App() {
               {mobileMenuOpen ? <CloseIcon /> : <Menu />}
             </button>
 
-            <span className="font-bold text-lg text-white tracking-tight">FinanDrive</span>
+            <span className="font-bold text-lg text-white tracking-tight">
+              FinanDrive
+            </span>
 
-            {/* Eye Toggle - Right Aligned relatively */}
             <button
               onClick={() => setShowValues(!showValues)}
               className="absolute right-0 text-slate-400"
@@ -730,29 +758,27 @@ function App() {
         </div>
       )}
 
+      {/* Sidebar */}
       <aside
         className={`
         fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 text-slate-300 transform transition-transform duration-300 ease-in-out
         md:relative md:translate-x-0 shrink-0
         ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"}
-        ${activeTab === "shift" ? "md:w-20 lg:w-64" : ""} 
+        ${activeTab === "shift" ? "md:w-20 lg:w-64" : ""}
       `}
       >
         <div className="p-6 hidden md:flex justify-between items-center border-b border-slate-800 h-20">
-          <div>
-            <span
-              className={`font-extrabold text-2xl tracking-tight text-white ${
-                activeTab === "shift" ? "md:hidden lg:block" : ""
-              }`}
-            >
-              FinanDrive
-            </span>
-            <div className="text-[10px] text-slate-500 mt-1">
-              Motorista: <span className="font-semibold text-slate-200">{driverId}</span>
-            </div>
-          </div>
+          <span
+            className={`font-extrabold text-2xl tracking-tight text-white ${
+              activeTab === "shift" ? "md:hidden lg:block" : ""
+            }`}
+          >
+            FinanDrive
+          </span>
           {activeTab === "shift" && (
-            <span className="hidden md:block lg:hidden font-bold text-white text-xl">FD</span>
+            <span className="hidden md:block lg:hidden font-bold text-white text-xl">
+              FD
+            </span>
           )}
         </div>
 
@@ -769,10 +795,15 @@ function App() {
             }`}
           >
             <LayoutDashboard size={20} />
-            <span className={`${activeTab === "shift" ? "md:hidden lg:inline" : ""}`}>
+            <span
+              className={`${
+                activeTab === "shift" ? "md:hidden lg:inline" : ""
+              }`}
+            >
               Visão Geral
             </span>
           </button>
+
           <button
             onClick={() => {
               setActiveTab("shift");
@@ -785,10 +816,15 @@ function App() {
             }`}
           >
             <Play size={20} />
-            <span className={`${activeTab === "shift" ? "md:hidden lg:inline" : ""}`}>
+            <span
+              className={`${
+                activeTab === "shift" ? "md:hidden lg:inline" : ""
+              }`}
+            >
               Turno Atual
             </span>
           </button>
+
           <button
             onClick={() => {
               setActiveTab("reports");
@@ -801,10 +837,15 @@ function App() {
             }`}
           >
             <PieChartIcon size={20} />
-            <span className={`${activeTab === "shift" ? "md:hidden lg:inline" : ""}`}>
+            <span
+              className={`${
+                activeTab === "shift" ? "md:hidden lg:inline" : ""
+              }`}
+            >
               Relatórios
             </span>
           </button>
+
           <button
             onClick={() => {
               setActiveTab("bills");
@@ -817,8 +858,15 @@ function App() {
             }`}
           >
             <CalendarClock size={20} />
-            <span className={`${activeTab === "shift" ? "md:hidden lg:inline" : ""}`}>Contas</span>
+            <span
+              className={`${
+                activeTab === "shift" ? "md:hidden lg:inline" : ""
+              }`}
+            >
+              Contas
+            </span>
           </button>
+
           <button
             onClick={() => {
               setActiveTab("history");
@@ -831,7 +879,11 @@ function App() {
             }`}
           >
             <History size={20} />
-            <span className={`${activeTab === "shift" ? "md:hidden lg:inline" : ""}`}>
+            <span
+              className={`${
+                activeTab === "shift" ? "md:hidden lg:inline" : ""
+              }`}
+            >
               Histórico
             </span>
           </button>
@@ -845,23 +897,32 @@ function App() {
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium hover:bg-slate-800 hover:text-white text-slate-300`}
             >
               <Settings size={20} />
-              <span className={`${activeTab === "shift" ? "md:hidden lg:inline" : ""}`}>
+              <span
+                className={`${
+                  activeTab === "shift" ? "md:hidden lg:inline" : ""
+                }`}
+              >
                 Configurações
               </span>
             </button>
 
             <button
               onClick={handleChangeDriver}
-              className="w-full text-[11px] text-slate-500 hover:text-rose-400 mt-1 text-left px-4"
+              className="w-full text-xs text-slate-500 hover:text-slate-300 px-2 py-1 rounded-lg text-left"
             >
-              Trocar de motorista
+              Trocar motorista ({driverId})
             </button>
           </div>
         </nav>
       </aside>
 
-      <main className={`flex-1 overflow-y-auto h-full ${activeTab === "shift" ? "bg-slate-950" : "p-4 md:p-8"}`}>
-        {/* HEADER PRINCIPAL (não shift) */}
+      {/* Conteúdo principal */}
+      <main
+        className={`flex-1 overflow-y-auto h-full ${
+          activeTab === "shift" ? "bg-slate-950" : "p-4 md:p-8"
+        }`}
+      >
+        {/* Header (não no turno) */}
         {activeTab !== "shift" && (
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
             <div className="flex items-center gap-4">
@@ -878,14 +939,15 @@ function App() {
                 <p className="text-slate-500 text-sm flex items-center gap-1">
                   {activeTab === "dashboard" && stats.pendingBillsTotal > 0 ? (
                     <span className="text-rose-500 font-medium">
-                      Você tem {formatCurrency(stats.pendingBillsTotal)} em contas pendentes.
+                      Você tem {formatCurrency(stats.pendingBillsTotal)} em
+                      contas pendentes.
                     </span>
                   ) : (
                     <span>Gestão profissional para motoristas.</span>
                   )}
                 </p>
               </div>
-              {/* Eye Toggle for Desktop */}
+
               <button
                 onClick={() => setShowValues(!showValues)}
                 className="hidden md:flex p-2 text-slate-400 hover:text-indigo-600 bg-white hover:bg-slate-50 rounded-lg border border-slate-200 transition-colors"
@@ -917,7 +979,7 @@ function App() {
           </div>
         )}
 
-        {/* TELA DE TURNO */}
+        {/* Tela de turno */}
         {activeTab === "shift" && (
           <div className="h-full flex flex-col p-3 md:p-6 max-w-7xl mx-auto overflow-hidden">
             <div className="flex justify-between items-center mb-3 shrink-0">
@@ -950,7 +1012,11 @@ function App() {
                           : "bg-rose-400"
                       }`}
                     ></div>
-                    {shiftState.isActive ? (shiftState.isPaused ? "PAUSADO" : "ONLINE") : "OFFLINE"}
+                    {shiftState.isActive
+                      ? shiftState.isPaused
+                        ? "PAUSADO"
+                        : "ONLINE"
+                      : "OFFLINE"}
                   </div>
                 </div>
               </div>
@@ -966,7 +1032,10 @@ function App() {
                     Hoje
                   </div>
                   <div className="text-white text-sm font-medium">
-                    {new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}
+                    {new Date().toLocaleDateString("pt-BR", {
+                      day: "2-digit",
+                      month: "short",
+                    })}
                   </div>
                 </div>
               </div>
@@ -980,7 +1049,10 @@ function App() {
                 <div className="text-3xl md:text-4xl font-mono font-bold text-white tracking-tighter">
                   {formatTime(shiftState.elapsedSeconds).split(" ")[0]}
                   <span className="text-base md:text-xl text-slate-500 ml-1">
-                    {formatTime(shiftState.elapsedSeconds).split(" ").slice(1).join(" ")}
+                    {formatTime(shiftState.elapsedSeconds)
+                      .split(" ")
+                      .slice(1)
+                      .join(" ")}
                   </span>
                 </div>
               </div>
@@ -1002,8 +1074,12 @@ function App() {
                 className="bg-black hover:bg-slate-900 border border-slate-800 rounded-xl p-3 h-20 flex flex-col justify-between transition-all active:scale-95 disabled:opacity-40"
               >
                 <div className="flex justify-between w-full items-start">
-                  <div className="bg-slate-800 p-1.5 rounded-lg text-white font-bold text-xs">U</div>
-                  <div className="text-slate-400 text-[10px] uppercase font-bold">Uber</div>
+                  <div className="bg-slate-800 p-1.5 rounded-lg text-white font-bold text-xs">
+                    U
+                  </div>
+                  <div className="text-slate-400 text-[10px] uppercase font-bold">
+                    Uber
+                  </div>
                 </div>
                 <div className="text-white font-bold text-lg text-right">
                   {formatCurrency(shiftState.earnings.uber)}
@@ -1016,8 +1092,12 @@ function App() {
                 className="bg-yellow-400 hover:bg-yellow-300 border border-yellow-500 rounded-xl p-3 h-20 flex flex-col justify-between transition-all active:scale-95 disabled:opacity-40"
               >
                 <div className="flex justify-between w-full items-start">
-                  <div className="bg-black/10 p-1.5 rounded-lg text-black font-bold text-xs">99</div>
-                  <div className="text-black/60 text-[10px] uppercase font-bold">99Pop</div>
+                  <div className="bg-black/10 p-1.5 rounded-lg text-black font-bold text-xs">
+                    99
+                  </div>
+                  <div className="text-black/60 text-[10px] uppercase font-bold">
+                    99Pop
+                  </div>
                 </div>
                 <div className="text-black font-bold text-lg text-right">
                   {formatCurrency(shiftState.earnings.n99)}
@@ -1030,8 +1110,12 @@ function App() {
                 className="bg-green-600 hover:bg-green-500 border border-green-500 rounded-xl p-3 h-20 flex flex-col justify-between transition-all active:scale-95 disabled:opacity-40"
               >
                 <div className="flex justify-between w-full items-start">
-                  <div className="bg-white/20 p-1.5 rounded-lg text-white font-bold text-xs">In</div>
-                  <div className="text-green-100 text-[10px] uppercase font-bold">InDrive</div>
+                  <div className="bg-white/20 p-1.5 rounded-lg text-white font-bold text-xs">
+                    In
+                  </div>
+                  <div className="text-green-100 text-[10px] uppercase font-bold">
+                    InDrive
+                  </div>
                 </div>
                 <div className="text-white font-bold text-lg text-right">
                   {formatCurrency(shiftState.earnings.indrive)}
@@ -1047,7 +1131,9 @@ function App() {
                   <div className="bg-white/10 p-1.5 rounded-lg text-white">
                     <Wallet size={14} />
                   </div>
-                  <div className="text-slate-300 text-[10px] uppercase font-bold">Partic.</div>
+                  <div className="text-slate-300 text-[10px] uppercase font-bold">
+                    Partic.
+                  </div>
                 </div>
                 <div className="text-white font-bold text-lg text-right">
                   {formatCurrency(shiftState.earnings.private)}
@@ -1063,7 +1149,9 @@ function App() {
                   <div className="bg-white/20 p-1.5 rounded-lg text-white">
                     <Gauge size={14} />
                   </div>
-                  <div className="text-blue-100 text-[10px] uppercase font-bold">KM</div>
+                  <div className="text-blue-100 text-[10px] uppercase font-bold">
+                    KM
+                  </div>
                 </div>
                 <div className="text-white font-bold text-lg text-right">
                   {shiftState.km.toFixed(1)}
@@ -1079,7 +1167,9 @@ function App() {
                   <div className="bg-white/20 p-1.5 rounded-lg text-white">
                     <Fuel size={14} />
                   </div>
-                  <div className="text-rose-100 text-[10px] uppercase font-bold">Gasto</div>
+                  <div className="text-rose-100 text-[10px] uppercase font-bold">
+                    Gasto
+                  </div>
                 </div>
                 <div className="text-white font-bold text-lg text-right">
                   {formatCurrency(shiftState.expenses)}
@@ -1152,7 +1242,7 @@ function App() {
           </div>
         )}
 
-        {/* DASHBOARD */}
+        {/* Dashboard */}
         {activeTab === "dashboard" && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4">
@@ -1166,7 +1256,9 @@ function App() {
                       <p className="text-indigo-100 text-sm font-medium mb-1 flex items-center gap-1">
                         <Target size={14} /> Meta Diária (Real)
                       </p>
-                      <h3 className="text-3xl font-bold mb-1">{formatCurrency(stats.dailyGoal)}</h3>
+                      <h3 className="text-3xl font-bold mb-1">
+                        {formatCurrency(stats.dailyGoal)}
+                      </h3>
                     </div>
                     <button
                       onClick={() => setIsSettingsModalOpen(true)}
@@ -1198,7 +1290,9 @@ function App() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                 <div className="flex justify-between items-center mb-6">
-                  <h3 className="font-bold text-slate-800">Ganhos vs Despesas</h3>
+                  <h3 className="font-bold text-slate-800">
+                    Ganhos vs Despesas
+                  </h3>
                   <div className="text-xs text-slate-500">Visão Geral</div>
                 </div>
                 <div className="h-72 w-full flex items-center justify-center">
@@ -1214,7 +1308,7 @@ function App() {
                         dataKey="value"
                       >
                         {pieData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
+                          <Cell key={index} fill={entry.color} />
                         ))}
                       </Pie>
                       <Legend
@@ -1224,14 +1318,17 @@ function App() {
                         iconType="circle"
                       />
                       <Tooltip
-                        formatter={(value: number) => [
-                          showValues ? `R$ ${value.toFixed(2)}` : "R$ ****",
+                        formatter={(value: any) => [
+                          showValues
+                            ? `R$ ${(value as number).toFixed(2)}`
+                            : "R$ ****",
                           "",
                         ]}
                         contentStyle={{
                           borderRadius: "12px",
                           border: "none",
-                          boxShadow: "0 10px 15px -3px rgb(0 0 0 / 0.1)",
+                          boxShadow:
+                            "0 10px 15px -3px rgb(0 0 0 / 0.1)",
                         }}
                       />
                     </PieChart>
@@ -1242,7 +1339,9 @@ function App() {
               <div className="space-y-6">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                   <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-bold text-slate-800 text-sm">Próximos Pagamentos</h3>
+                    <h3 className="font-bold text-slate-800 text-sm">
+                      Próximos Pagamentos
+                    </h3>
                     <button
                       onClick={() => setActiveTab("bills")}
                       className="text-indigo-600 text-xs hover:underline"
@@ -1273,7 +1372,9 @@ function App() {
                         </div>
                       ))}
                     {bills.filter((b) => !b.isPaid).length === 0 && (
-                      <p className="text-center text-xs text-slate-400 py-4">Tudo pago! 🎉</p>
+                      <p className="text-center text-xs text-slate-400 py-4">
+                        Tudo pago! 🎉
+                      </p>
                     )}
                   </div>
                 </div>
@@ -1282,17 +1383,19 @@ function App() {
           </div>
         )}
 
-        {/* RELATÓRIOS */}
+        {/* Relatórios */}
         {activeTab === "reports" && (
           <ReportsTab transactions={transactions} showValues={showValues} />
         )}
 
-        {/* CONTAS */}
+        {/* Contas */}
         {activeTab === "bills" && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
               <div>
-                <h2 className="text-lg font-bold text-slate-800">Contas a Pagar</h2>
+                <h2 className="text-lg font-bold text-slate-800">
+                  Contas a Pagar
+                </h2>
                 <p className="text-slate-500 text-sm">
                   Gerencie suas obrigações futuras e mantenha o caixa positivo.
                 </p>
@@ -1321,10 +1424,16 @@ function App() {
                   <div className="flex justify-between items-start mb-3">
                     <div
                       className={`p-2 rounded-lg ${
-                        bill.isPaid ? "bg-emerald-100 text-emerald-600" : "bg-rose-100 text-rose-600"
+                        bill.isPaid
+                          ? "bg-emerald-100 text-emerald-600"
+                          : "bg-rose-100 text-rose-600"
                       }`}
                     >
-                      {bill.isPaid ? <Wallet size={20} /> : <CalendarClock size={20} />}
+                      {bill.isPaid ? (
+                        <Wallet size={20} />
+                      ) : (
+                        <CalendarClock size={20} />
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <span
@@ -1355,7 +1464,9 @@ function App() {
                   <div className="mb-1">
                     <h4
                       className={`font-semibold ${
-                        bill.isPaid ? "text-slate-500 line-through" : "text-slate-800"
+                        bill.isPaid
+                          ? "text-slate-500 line-through"
+                          : "text-slate-800"
                       }`}
                     >
                       {bill.description}
@@ -1387,35 +1498,38 @@ function App() {
           </div>
         )}
 
-        {/* HISTÓRICO */}
+        {/* Histórico */}
         {activeTab === "history" && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
               <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
                 <div>
                   <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                    <History className="text-indigo-600" /> Histórico de Transações
+                    <History className="text-indigo-600" /> Histórico de
+                    Transações
                   </h2>
                 </div>
 
                 <div className="flex bg-slate-100 p-1 rounded-xl overflow-x-auto max-w-full">
-                  {(["today", "week", "month", "all", "custom"] as const).map((range) => (
-                    <button
-                      key={range}
-                      onClick={() => setHistoryRange(range)}
-                      className={`px-3 py-1.5 text-xs md:text-sm font-medium rounded-lg transition-all whitespace-nowrap ${
-                        historyRange === range
-                          ? "bg-white text-indigo-600 shadow-sm"
-                          : "text-slate-500 hover:text-slate-700"
-                      }`}
-                    >
-                      {range === "today" && "Hoje"}
-                      {range === "week" && "Semana"}
-                      {range === "month" && "Mês"}
-                      {range === "all" && "Tudo"}
-                      {range === "custom" && "Outro"}
-                    </button>
-                  ))}
+                  {(["today", "week", "month", "all", "custom"] as const).map(
+                    (range) => (
+                      <button
+                        key={range}
+                        onClick={() => setHistoryRange(range)}
+                        className={`px-3 py-1.5 text-xs md:text-sm font-medium rounded-lg transition-all whitespace-nowrap ${
+                          historyRange === range
+                            ? "bg-white text-indigo-600 shadow-sm"
+                            : "text-slate-500 hover:text-slate-700"
+                        }`}
+                      >
+                        {range === "today" && "Hoje"}
+                        {range === "week" && "Semana"}
+                        {range === "month" && "Mês"}
+                        {range === "all" && "Tudo"}
+                        {range === "custom" && "Outro"}
+                      </button>
+                    )
+                  )}
                 </div>
               </div>
 
@@ -1457,10 +1571,14 @@ function App() {
                   </div>
                 </div>
                 <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
-                  <div className="text-xs text-slate-600 font-bold uppercase mb-1">Saldo</div>
+                  <div className="text-xs text-slate-600 font-bold uppercase mb-1">
+                    Saldo
+                  </div>
                   <div
                     className={`text-sm md:text-lg font-bold ${
-                      historySummary.balance >= 0 ? "text-indigo-600" : "text-rose-600"
+                      historySummary.balance >= 0
+                        ? "text-indigo-600"
+                        : "text-rose-600"
                     }`}
                   >
                     {formatCurrency(historySummary.balance)}
@@ -1488,10 +1606,13 @@ function App() {
                 ) : (
                   filteredHistory.map((t) => (
                     <div key={t.id} className="hover:bg-slate-50 transition-colors">
-                      {/* Desktop Row */}
                       <div className="hidden md:grid grid-cols-12 items-center p-4 text-sm">
-                        <div className="col-span-2 text-slate-600">{formatDateBr(t.date)}</div>
-                        <div className="col-span-4 font-medium text-slate-800">{t.description}</div>
+                        <div className="col-span-2 text-slate-600">
+                          {formatDateBr(t.date)}
+                        </div>
+                        <div className="col-span-4 font-medium text-slate-800">
+                          {t.description}
+                        </div>
                         <div className="col-span-2">
                           <span
                             className={`px-2 py-1 rounded text-xs border ${
@@ -1504,11 +1625,15 @@ function App() {
                           </span>
                         </div>
                         <div className="col-span-2 text-slate-500 text-xs">
-                          {t.mileage ? `${t.mileage}km • ${t.durationHours}h` : "-"}
+                          {t.mileage
+                            ? `${t.mileage}km • ${t.durationHours}h`
+                            : "-"}
                         </div>
                         <div
                           className={`col-span-1 font-bold text-right ${
-                            t.type === TransactionType.INCOME ? "text-emerald-600" : "text-rose-600"
+                            t.type === TransactionType.INCOME
+                              ? "text-emerald-600"
+                              : "text-rose-600"
                           }`}
                         >
                           {t.type === TransactionType.INCOME ? "+" : "-"}{" "}
@@ -1524,7 +1649,6 @@ function App() {
                         </div>
                       </div>
 
-                      {/* Mobile Row */}
                       <div className="md:hidden p-4 flex justify-between items-center">
                         <div className="flex-1 min-w-0 pr-4">
                           <div className="font-semibold text-slate-800 truncate mb-1">
@@ -1572,6 +1696,7 @@ function App() {
         )}
       </main>
 
+      {/* Modais */}
       <TransactionModal
         isOpen={isTransModalOpen}
         onClose={() => setIsTransModalOpen(false)}
